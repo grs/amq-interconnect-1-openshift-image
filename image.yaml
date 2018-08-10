@@ -4,7 +4,7 @@ name: "amq-interconnect-1/amq-interconnect-11-openshift"
 description: "Red Hat AMQ Interconnect OpenShift container image"
 version: "1.0"
 from: "jboss/base-rhel7:1.1"
-labels:    
+labels:
     - name: "com.redhat.component"
       value: "amq-7-interconnect-11-openshift-container"
     - name: "io.k8s.description"
@@ -28,8 +28,14 @@ modules:
           - name: interconnect.launch
 packages:
       repositories:
-          - jboss-rhom
+          - name: console
+            url:
+                repository: http://brew-task-repos.usersys.redhat.com/repos/official/qpid-dispatch/1.2.0/6.el7/qpid-dispatch-1.2.0-6.el7.repo
+          - name: jboss-rhom
+            url:
+                repository: http://download.eng.bos.redhat.com/rcm-guest/puddles/RHOM/1.0/latest/puddle.repo
       install:
+          - qpid-dispatch-console
           - qpid-dispatch-router
           - qpid-dispatch-tools
 run:
@@ -39,4 +45,4 @@ run:
 osbs:
       repository:
             name: containers/amq-7-interconnect
-            branch: rh-amq-interconnect-1.1-openshift-rhel-7
+            branch: rh-amq-interconnect-1.1-openshift-dev-rhel-7
