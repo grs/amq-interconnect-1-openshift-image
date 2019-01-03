@@ -19,10 +19,6 @@ parameters:
   name: APPLICATION_NAME
   value: amq-interconnect
   required: true
-- displayName: Router Internal Certificates
-  description: The name of the secret that contains the certificate with which to authenticate inter-router connections.
-  name: INTER_ROUTER_CERTS_SECRET
-  value: inter-router-certs
 - displayName: Secret for User Data
   description: The name of the secret that contains the list of user name/password pairs.
   name: USERS_SECRET
@@ -86,7 +82,7 @@ parameters:
         name: inter_router_tls
         certFile: /etc/qpid-dispatch-certs/inter-router/tls.crt
         privateKeyFile: /etc/qpid-dispatch-certs/inter-router/tls.key
-        caCertFile: /etc/qpid-dispatch-certs/inter-router/ca.crt
+        caCertFile: /etc/qpid-dispatch-certs/inter-router-ca/ca.crt
     }
 
     sslProfile {
@@ -138,7 +134,6 @@ objects:
       application: ${APPLICATION_NAME}
     annotations:
       description: The router's AMQP port.
-      service.alpha.openshift.io/serving-cert-secret-name: ${APPLICATION_NAME}-cert
   spec:
     ports:
     - port: 5672
@@ -228,9 +223,12 @@ objects:
           - name: certs
             readOnly: true
             mountPath: /etc/qpid-dispatch-certs/normal/
-          - name: inter-router-certs
+          - name: inter-router-cert
             readOnly: true
             mountPath: /etc/qpid-dispatch-certs/inter-router/
+          - name: inter-router-ca-cert
+            readOnly: true
+            mountPath: /etc/qpid-dispatch-certs/inter-router-ca/
           - name: config-volume
             mountPath: /etc/qpid-dispatch/
           - name: sasl-config
@@ -250,9 +248,12 @@ objects:
         - name: certs
           secret:
             secretName: ${APPLICATION_NAME}-cert
-        - name: inter-router-certs
+        - name: inter-router-cert
           secret:
-            secretName: ${INTER_ROUTER_CERTS_SECRET}
+            secretName: ${APPLICATION_NAME}-inter-router-cert
+        - name: inter-router-ca-cert
+          secret:
+            secretName: ${APPLICATION_NAME}-inter-router-ca-cert
         - name: config-volume
           configMap:
             name: ${APPLICATION_NAME}
@@ -288,6 +289,34 @@ objects:
       application: ${APPLICATION_NAME}
   data:
     qdrouterd.conf: ${QDROUTERD_CONF}
+- kind: Route
+  apiVersion: v1
+  metadata:
+    name: ${APPLICATION_NAME}
+    labels:
+      application: ${APPLICATION_NAME}
+  spec:
+    port:
+      targetPort: amqps
+    tls:
+      termination: passthrough
+    to:
+      kind: Service
+      name: ${APPLICATION_NAME}
+- kind: Route
+  apiVersion: v1
+  metadata:
+    name: ${APPLICATION_NAME}-console
+    labels:
+      application: ${APPLICATION_NAME}
+  spec:
+    port:
+      targetPort: http
+    tls:
+      termination: passthrough
+    to:
+      kind: Service
+      name: ${APPLICATION_NAME}
 - kind: ConfigMap
   apiVersion: v1
   metadata:
@@ -300,3 +329,52 @@ objects:
       auxprop_plugin: sasldb
       sasldb_path: /opt/interconnect/etc/qdrouterd.sasldb
       mech_list: SCRAM-SHA-1 DIGEST-MD5 PLAIN EXTERNAL
+- kind: ServiceAccount
+  apiVersion: v1
+  metadata:
+    name: ${APPLICATION_NAME}-certificate-generator
+    labels:
+      application: "${APPLICATION_NAME}"
+- kind: RoleBinding
+  apiVersion: v1
+  metadata:
+    name: ${APPLICATION_NAME}-secret-generation
+    labels:
+      application: "${APPLICATION_NAME}"
+  subjects:
+  - kind: ServiceAccount
+    name: ${APPLICATION_NAME}-certificate-generator
+  roleRef:
+    name: edit
+- kind: Job
+  apiVersion: batch/v1
+  metadata:
+    name: ${APPLICATION_NAME}-generate-inter-router-certs
+    labels:
+      application: "${APPLICATION_NAME}"
+  spec:
+    template:
+      spec:
+        serviceAccountName: ${APPLICATION_NAME}-certificate-generator
+        containers:
+        - name: cert-generator
+          image: gordons/cersec:1.0
+          command: ['cersec', '--service=${APPLICATION_NAME}', '--generate-cert=${APPLICATION_NAME}-inter-router-cert', '--generate-ca', '--ca-cert=${APPLICATION_NAME}-inter-router-ca-cert']
+        restartPolicy: Never
+    backoffLimit: 4
+- kind: Job
+  apiVersion: batch/v1
+  metadata:
+    name: ${APPLICATION_NAME}-generate-service-certs
+    labels:
+      application: "${APPLICATION_NAME}"
+  spec:
+    template:
+      spec:
+        serviceAccountName: ${APPLICATION_NAME}-certificate-generator
+        containers:
+        - name: cert-generator
+          image: gordons/cersec:1.0
+          command: ['cersec', '--service=${APPLICATION_NAME}', '--route=${APPLICATION_NAME}', '--generate-cert=${APPLICATION_NAME}-cert', '--generate-ca', '--ca-cert=${APPLICATION_NAME}-ca-cert']
+        restartPolicy: Never
+    backoffLimit: 4
